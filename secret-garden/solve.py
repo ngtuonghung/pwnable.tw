@@ -30,7 +30,7 @@ exe = ELF("secretgarden_patched")
 libc = ELF("libc_64.so.6")
 ld = ELF("./ld-2.23.so")
 
-context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
+context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
 
 gdbscript = '''
@@ -48,7 +48,7 @@ continue
 def conn():
     if args.LOCAL:
         p = process([exe.path])
-        sleep(0.1)
+        sleep(0.25)
         if args.GDB:
             gdb.attach(p, gdbscript=gdbscript)
             sleep(1)
