@@ -212,7 +212,7 @@ char *__fastcall input_secret(Secret *secret, size_t size)
   return result;
 }
 
-//----- (0000000000000DE4) ----------------------------------------------------
+//----- (0000000000000DE4)  ----------------------------------------------------
 Secret *__fastcall clear_secret(Secret *secret)
 {
   Secret *result; // rax
