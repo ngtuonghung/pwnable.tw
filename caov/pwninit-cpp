@@ -1,0 +1,107 @@
+#!/bin/bash
+# pwninit-cpp: Full setup for C++ CTF pwn challenges
+# Usage: pwninit-cpp --bin <binary> --libc <libc.so>
+
+set -e
+
+GLIBC_ALL_IN_ONE="$HOME/Tools/glibc-all-in-one"
+
+# ─── Parse args ───────────────────────────────────────────────────────────────
+BIN=""
+LIBC=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --bin)  BIN="$2";  shift 2 ;;
+        --libc) LIBC="$2"; shift 2 ;;
+        *) echo "Usage: pwninit-cpp --bin <binary> --libc <libc.so>"; exit 1 ;;
+    esac
+done
+
+if [[ -z "$BIN" || -z "$LIBC" ]]; then
+    echo "Usage: pwninit-cpp --bin <binary> --libc <libc.so>"
+    exit 1
+fi
+
+PATCHED="${BIN}_patched"
+
+# ─── Step 1: pwninit ──────────────────────────────────────────────────────────
+echo "[*] Running pwninit..."
+~/Tools/pwninit --template-path ~/Tools/pwninit-template/pwninit-template-wsl.py --bin "$BIN" --libc "$LIBC"
+
+# ─── Step 2: Detect GLIBC version ─────────────────────────────────────────────
+GLIBC_VER=$(strings "$LIBC" | grep -oP 'GLIBC_\K[0-9]+\.[0-9]+' | sort -V | tail -1)
+echo "[*] Detected GLIBC $GLIBC_VER"
+
+# ─── Step 3: Map to Ubuntu tag + libstdc++ version ────────────────────────────
+case "$GLIBC_VER" in
+    2.23) UBUNTU_TAG="16.04"; LIBSTDCPP_VER="6.0.21" ;;
+    2.27) UBUNTU_TAG="18.04"; LIBSTDCPP_VER="6.0.25" ;;
+    2.31) UBUNTU_TAG="20.04"; LIBSTDCPP_VER="6.0.28" ;;
+    2.35) UBUNTU_TAG="22.04"; LIBSTDCPP_VER="6.0.30" ;;
+    2.38) UBUNTU_TAG="23.04"; LIBSTDCPP_VER="6.0.31" ;;
+    *)
+        echo "[!] Unknown GLIBC $GLIBC_VER, defaulting to ubuntu:16.04"
+        UBUNTU_TAG="16.04"; LIBSTDCPP_VER="6.0.21" ;;
+esac
+echo "[*] Using ubuntu:$UBUNTU_TAG (libstdc++.so.$LIBSTDCPP_VER)"
+
+# ─── Step 4: Get libm from glibc-all-in-one ───────────────────────────────────
+GLIBC_DIR=$(find "$GLIBC_ALL_IN_ONE/libs" -maxdepth 1 -name "*${GLIBC_VER}*amd64" 2>/dev/null | head -1)
+if [[ -z "$GLIBC_DIR" ]]; then
+    echo "[*] Downloading glibc $GLIBC_VER via glibc-all-in-one..."
+    bash "$GLIBC_ALL_IN_ONE/download" "${GLIBC_VER}-0ubuntu11.3_amd64" || \
+    bash "$GLIBC_ALL_IN_ONE/download" "${GLIBC_VER}-0ubuntu5_amd64"
+    GLIBC_DIR=$(find "$GLIBC_ALL_IN_ONE/libs" -maxdepth 1 -name "*${GLIBC_VER}*amd64" | head -1)
+fi
+echo "[*] Copying libm from $GLIBC_DIR"
+cp "$GLIBC_DIR/libm-${GLIBC_VER}.so" .
+ln -sf "libm-${GLIBC_VER}.so" libm.so.6
+
+# ─── Step 5: Get libstdc++ and libgcc_s from Docker ───────────────────────────
+echo "[*] Extracting libstdc++/libgcc_s from ubuntu:$UBUNTU_TAG..."
+docker rm -f cpp_extract 2>/dev/null || true
+docker run -d --name cpp_extract "ubuntu:$UBUNTU_TAG" sleep 30
+docker cp "cpp_extract:/usr/lib/x86_64-linux-gnu/libstdc++.so.${LIBSTDCPP_VER}" .
+docker cp "cpp_extract:/lib/x86_64-linux-gnu/libgcc_s.so.1" .
+docker rm -f cpp_extract
+ln -sf "libstdc++.so.${LIBSTDCPP_VER}" libstdc++.so.6
+
+# ─── Step 6: Patch binary RPATH (never patch .so files) ───────────────────────
+echo "[*] Patching $PATCHED..."
+patchelf --set-interpreter "./ld-${GLIBC_VER}.so" \
+         --set-rpath "." \
+         "$PATCHED"
+
+# ─── Step 7: Update solve.py process() line ───────────────────────────────────
+SOLVE="./solve.py"
+if [[ -f "$SOLVE" ]]; then
+    echo "[*] Updating solve.py..."
+    python3 - <<EOF
+import re
+
+with open("$SOLVE", "r") as f:
+    content = f.read()
+
+new_content = re.sub(
+    r'p = process\(.*?\)',
+    "p = process(['./ld-${GLIBC_VER}.so', '--library-path', '.', './$PATCHED'])",
+    content,
+    flags=re.DOTALL
+)
+
+with open("$SOLVE", "w") as f:
+    f.write(new_content)
+
+print("[+] solve.py updated")
+EOF
+else
+    echo "[!] solve.py not found, skipping"
+fi
+
+# ─── Done ─────────────────────────────────────────────────────────────────────
+echo ""
+echo "[+] All done! Run with:"
+echo "    ./ld-${GLIBC_VER}.so --library-path . ./$PATCHED"
+echo ""
+echo "[+] solve.py process() line:"
+grep "p = process" "$SOLVE" 2>/dev/null || true

