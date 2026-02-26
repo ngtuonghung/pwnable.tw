@@ -1,0 +1,8 @@
+pwndbg> checksec
+File:     /home/ngtuonghung/pwnable.tw/printable/printable_patched
+Arch:     amd64
+RELRO:      Full RELRO
+Stack:      No canary found
+NX:         NX enabled
+PIE:        No PIE (0x400000)
+Stripped:   No
