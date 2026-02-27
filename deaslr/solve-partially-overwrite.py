@@ -70,7 +70,7 @@ while True:
 
     p = conn()
 
-    # On WSL Ubuntu 24.04 ld base always ends with 0x1000000
+    # On WSL Ubuntu 24.04 ld base always ends with 0x100000
     if args.LOCAL:
         with open(f'/proc/{p.pid}/maps') as f:
             ld_lines = [line for line in f if 'ld-2.23.so' in line]

@@ -31,7 +31,7 @@ e = context.binary = ELF('./printable_patched', checksec=False)
 libc = ELF('./libc_64.so.6', checksec=False)
 ld = ELF('./ld-linux-x86-64.so.2', checksec=False)
 
-context.terminal = ["/usr/bin/tilix", "-a", "session-add-right", "-e", "bash", "-c"]
+context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 
 gdbscript = '''
 cd ''' + os.getcwd() + '''
